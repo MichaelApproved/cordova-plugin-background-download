@@ -37,6 +37,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.database.Cursor;
 import android.net.Uri;
+import android.util.Log;
 
 /**
  * Based on DownloadManager which is intended to be used for long-running HTTP downloads. Support of Android 2.3. (API 9) and later
@@ -124,7 +125,7 @@ public class BackgroundDownload extends CordovaPlugin {
             this.timerProgressUpdate = TimerProgressUpdate;
         };
     }
-    
+
     HashMap<String, Download> activDownloads = new HashMap<String, Download>();
 
     @Override
@@ -298,6 +299,7 @@ public class BackgroundDownload extends CordovaPlugin {
 
         DownloadManager mgr = (DownloadManager) cordova.getActivity().getSystemService(Context.DOWNLOAD_SERVICE);
         mgr.remove(curDownload.getDownloadId());
+        CleanUp(curDownload);
         callbackContext.success();
     }
 
@@ -348,42 +350,44 @@ public class BackgroundDownload extends CordovaPlugin {
 
     private BroadcastReceiver receiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent) {
+          DownloadManager mgr = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
 
-            DownloadManager mgr = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+          long downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
+          DownloadManager.Query query = new DownloadManager.Query();
+          query.setFilterById(downloadId);
+          Cursor cursor = mgr.query(query);
 
-            long downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-            DownloadManager.Query query = new DownloadManager.Query();
-            query.setFilterById(downloadId);
-            Cursor cursor = mgr.query(query);
+          if (cursor != null && cursor.moveToFirst()) {
             int idxURI = cursor.getColumnIndex(DownloadManager.COLUMN_URI);
-            cursor.moveToFirst();
             String uri = cursor.getString(idxURI);
-
             Download curDownload = activDownloads.get(uri);
 
             try {
-                long receivedID = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
-                query.setFilterById(receivedID);
-                int idxStatus = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
-                int idxReason = cursor.getColumnIndex(DownloadManager.COLUMN_REASON);
+              long receivedID = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+              query.setFilterById(receivedID);
+              int idxStatus = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+              int idxReason = cursor.getColumnIndex(DownloadManager.COLUMN_REASON);
 
-                if (cursor.moveToFirst()) {
-                    int status = cursor.getInt(idxStatus);
-                    int reason = cursor.getInt(idxReason);
-                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                        copyTempFileToActualFile(curDownload);
-                    } else {
-                        curDownload.getCallbackContextDownloadStart().error("Download operation failed with status " + status + " and reason: "    + getUserFriendlyReason(reason));
-                    }
+              if (cursor.moveToFirst()) {
+                int status = cursor.getInt(idxStatus);
+                int reason = cursor.getInt(idxReason);
+                if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                  copyTempFileToActualFile(curDownload);
                 } else {
-                    curDownload.getCallbackContextDownloadStart().error("cancelled or terminated");
+                  curDownload.getCallbackContextDownloadStart().error("Download operation failed with status " + status + " and reason: " + getUserFriendlyReason(reason));
                 }
-                cursor.close();
+              } else {
+                curDownload.getCallbackContextDownloadStart().error("cancelled or terminated");
+              }
+              cursor.close();
             } catch (Exception ex) {
-                curDownload.getCallbackContextDownloadStart().error(ex.getMessage());
+              curDownload.getCallbackContextDownloadStart().error(ex.getMessage());
             } finally {
-                CleanUp(curDownload);
+              CleanUp(curDownload);
             }
+          }else{
+            Log.d("BackgroundDownload", "cursor did not move to first: ");
+          }
         }
     };
 
